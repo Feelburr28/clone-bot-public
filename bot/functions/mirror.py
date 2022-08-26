@@ -2,7 +2,7 @@ from base64 import b64encode
 from requests import get as rget, utils as rutils
 from re import match as re_match, search as re_search, split as re_split
 from time import sleep, time
-from os import path as ospath, remove as osremove, listdir, walk
+from os import path as ospath, remove as osremove, listdir, walk, rename as osrename
 from shutil import rmtree
 from threading import Thread
 from subprocess import run as srun
@@ -34,6 +34,10 @@ from bot.helper.others.bot_utils import (
     is_url,
     is_magnet,
     is_gdtot_link,
+    is_unified_link,
+    is_udrive_link,
+    is_sharer_link,
+    is_drivehubs_link,
     is_mega_link,
     is_gdrive_link,
     get_content_type,
@@ -49,6 +53,8 @@ from bot.helper.others.exceptions import (
     DirectDownloadLinkException,
     NotSupportedExtractionArchive,
 )
+
+from bot.helper.mirror.download.link_generator import direct_link_generator
 from bot.helper.mirror.download.gd_downloader import add_gd_download
 from bot.helper.mirror.download.telegram_downloader import TelegramDownloadHelper
 from bot.helper.mirror.status.extract_status import ExtractStatus
@@ -107,7 +113,7 @@ class MirrorListener:
                 self.message.chat.id, self.message.link, self.tag
             )
 
-    def onDownloadComplete(self):
+    def onDownloadComplete(self,new_name=None):
         with download_dict_lock:
             LOGGER.info(f"Download completed: {download_dict[self.uid].name()}")
             download = download_dict[self.uid]
@@ -120,6 +126,9 @@ class MirrorListener:
                 or not ospath.exists(f"{DOWNLOAD_DIR}{self.uid}/{name}")
             ):
                 name = listdir(f"{DOWNLOAD_DIR}{self.uid}")[-1]
+            if new_name is not None:
+                osrename(f"{DOWNLOAD_DIR}{self.uid}/{name}",f"{DOWNLOAD_DIR}{self.uid}/{new_name}")
+                name = new_name
             m_path = f"{DOWNLOAD_DIR}{self.uid}/{name}"
         if self.isZip:
             try:
@@ -374,6 +383,11 @@ def _mirror(
     name_args = mesg[0].split("|", maxsplit=1)
     qbitsel = False
     is_gdtot = False
+    is_unified = False
+    is_udrive = False
+    is_sharer = False
+    is_drivehubs = False
+    
     try:
         link = message_args[1]
         if link.startswith("s ") or link == "s":
@@ -392,7 +406,7 @@ def _mirror(
         name = name.split(" pswd: ")[0]
         name = name.strip()
     except:
-        name = ""
+        name = None
     link = re_split(r"pswd:| \|", link)[0]
     link = link.strip()
     pswdMsg = mesg[0].split(" pswd: ")
@@ -482,6 +496,24 @@ def _mirror(
         return sendMessage(help_msg, bot, message)
 
     LOGGER.info(link)
+    
+    if not is_mega_link(link) and not isQbit and not is_magnet(link) \
+        and not is_gdrive_link(link) and not link.endswith('.torrent'):
+        content_type = get_content_type(link)
+        if content_type is None or re_match(r'text/html|text/plain', content_type):
+            try:
+                is_gdtot = is_gdtot_link(link)
+                is_unified = is_unified_link(link)
+                is_udrive = is_udrive_link(link)
+                is_sharer = is_sharer_link(link)
+                is_drivehubs = is_drivehubs_link(link)
+                link = direct_link_generator(link)
+                LOGGER.info(f"Generated link: {link}")
+            except DirectDownloadLinkException as e:
+                LOGGER.info(str(e))
+                if str(e).startswith('ERROR:'):
+                    return sendMessage(str(e), bot, message)
+        
 
     listener = MirrorListener(bot, message, isZip, extract, isQbit, isLeech, pswd, tag)
 
@@ -494,7 +526,8 @@ def _mirror(
             gmsg += f"Use /{BotCommands.UnzipMirrorCommand} to extracts Google Drive archive file"
             sendMessage(gmsg, bot, message)
         else:
-            Thread(target=add_gd_download, args=(link, listener, is_gdtot)).start()
+            LOGGER.info(f"New Name: {name}")
+            Thread(target=add_gd_download, args=(link, listener, is_gdtot, is_unified, is_udrive, is_sharer, is_drivehubs, name)).start()
 
     if multi > 1:
         sleep(3)

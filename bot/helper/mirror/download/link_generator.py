@@ -8,6 +8,7 @@ from bot import (
     XSRF_TOKEN,
     laravel_session,
 )
+from bot.helper.others.bot_utils import *
 from bot.helper.others.exceptions import DirectDownloadLinkException
 import re
 import os
@@ -21,6 +22,19 @@ from lxml import etree
 from urllib.parse import urlparse, parse_qs
 import requests
 
+def direct_link_generator(link: str):
+    if is_gdtot_link(link):
+        return gdtot(link)
+    elif is_unified_link(link):
+        return unified(link)
+    elif is_udrive_link(link):
+        return udrive(link)
+    elif is_sharer_link(link):
+        return sharer_pw_dl(link)
+    elif is_drivehubs_link(link):
+        return drivehubs(link)
+    else:
+        raise DirectDownloadLinkException(f'No Direct link function found for {link}')
 
 def gdtot(url: str) -> str:
     if GDTOT_CRYPT is None:
@@ -28,7 +42,7 @@ def gdtot(url: str) -> str:
     client = requests.Session()
     client.cookies.update({"crypt": GDTOT_CRYPT})
     res = client.get(url)
-    res = client.get(f"https://new.gdtot.nl/dld?id={url.split('/')[-1]}")
+    res = client.get(f"https://new2.gdtot.sbs/dld?id={url.split('/')[-1]}")
     url = re.findall(r'URL=(.*?)"', res.text)[0]
     info = {}
     info["error"] = False
@@ -129,7 +143,7 @@ def unified(url: str) -> str:
     if info_parsed["error"]:
         raise DirectDownloadLinkException(f"ERROR! {info_parsed['error_message']}")
 
-    if urlparse(url).netloc == "appdrive.in":
+    if urlparse(url).netloc == "appdrive.info":
         flink = info_parsed["gdrive_link"]
         return flink
 
@@ -153,7 +167,7 @@ def unified(url: str) -> str:
 def parse_info(res, url):
     info_parsed = {}
     if 'drivebuzz' in url:
-        info_chunks = re_findall('<td\salign="right">(.*?)<\/td>', res.text)
+        info_chunks = re.findall('<td\salign="right">(.*?)<\/td>', res.text)
     elif 'sharer.pw' in url:
         f = re.findall(">(.*?)<\/td>", res.text)
         info_parsed = {}
@@ -174,6 +188,8 @@ def udrive(url: str) -> str:
         client = cloudscraper.create_scraper(delay=10, browser='chrome')
         
     if "hubdrive" in url:
+        if "hubdrive.in" in url:
+            url = url.replace(".in",".pro")
         client.cookies.update({"crypt": HUBDRIVE_CRYPT})
     if "drivehub" in url:
         client.cookies.update({"crypt": KATDRIVE_CRYPT})
